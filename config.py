@@ -17,7 +17,7 @@ class Config(object):
     DB_NAME  = os.environ.get("DB_NAME","SnowEncoderBot") 
 
     # Other Configs 
-    ADMIN = int(os.environ.get("ADMIN", "6650589235")) # ⚠️ Required
+    ADMIN = int(os.environ.get("ADMIN", "5487643307")) # ⚠️ Required
     LOG_CHANNEL = int(os.environ.get('LOG_CHANNEL', '-1002038215626')) # ⚠️ Required
     BOT_UPTIME = BOT_UPTIME  = time.time()
     START_PIC = os.environ.get("START_PIC", "https://telegra.ph/file/bd21f0b96f8af58016488.jpg")
