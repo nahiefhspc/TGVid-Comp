@@ -4,13 +4,10 @@ import asyncio
 import sys
 import humanize
 from pyrogram import Client, filters
-from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from helper.utils import Compress_Stats, skip, CompressVideo
 from helper.database import db
 from script import Txt
-
-# Dictionary to store queues for different users
-QUEUE = {}
 
 @Client.on_callback_query()
 async def Cb_Handle(bot: Client, query: CallbackQuery):
@@ -49,8 +46,6 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
         user_id = data.split('-')[1]
         try:
             await skip(e=query, userid=user_id)
-            if user_id in QUEUE:
-                QUEUE[user_id] = []  # Clear queue on skip
         except Exception as e:
             print(e)
 
@@ -59,50 +54,39 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
         text = f"""**__What do you want me to do with this file?__**\n\n**File Name** :- `{file.file_name}`\n\n**File Size** :- `{humanize.naturalsize(file.file_size)}`"""
         buttons = [
             [InlineKeyboardButton("Rᴇɴᴀᴍᴇ 📝", callback_data=f"rename-{query.from_user.id}")],
-            [InlineKeyboardButton("Cᴏᴍᴘʀᴇss 🗜️", callback_data=f"compress-{query.from_user.id}")]
+            [InlineKeyboardButton("Cᴏᴍᴘʀᴇss 🗜️", callback_data=f"auto_compress-{query.from_user.id}")]
         ]
         await query.message.edit(text=text, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data == 'setffmpeg':
         try:
             ffmpeg_code = await bot.ask(text=Txt.SEND_FFMPEG_CODE, chat_id=query.from_user.id, filters=filters.text, timeout=60, disable_web_page_preview=True)
-            SnowDev = await query.message.reply_text(text="**Setting Your FFMPEG CODE**\n\nPlease Wait...")
-            await db.set_ffmpegcode(query.from_user.id, ffmpeg_code.text)
-            await SnowDev.edit("✅️ __**Fғᴍᴘᴇɢ Cᴏᴅᴇ Sᴇᴛ Sᴜᴄᴄᴇssғᴜʟʟʏ**__")
         except:
-            await query.message.reply_text("**Eʀʀᴏʀ!!**\n\nRᴇǫᴜᴇsᴛ ᴛɪᴍᴇᴅ ᴏᴜᴛ.\nSᴇ� secondeᴛ ʙʏ ᴜsɪɴɢ /set_ffmpeg")
+            return await query.message.reply_text("**Eʀʀᴏʀ!!**\n\nRᴇǫᴜᴇsᴛ ᴛɪᴍᴇᴅ ᴏᴜᴛ.\nSᴇᴛ ʙʏ ᴜsɪɴɢ /set_ffmpeg")
+        SnowDev = await query.message.reply_text(text="**Setting Your FFMPEG CODE**\n\nPlease Wait...")
+        await db.set_ffmpegcode(query.from_user.id, ffmpeg_code.text)
+        await SnowDev.edit("✅️ __**Fғᴍᴘᴇɢ Cᴏᴅᴇ Sᴇᴛ Sᴜᴄᴄᴇssғᴜʟʟʏ**__")
 
-    elif data.startswith('compress'):
+    elif data.startswith('auto_compress'):
         user_id = data.split('-')[1]
+        
         if int(user_id) not in [query.from_user.id, 0]:
             return await query.answer(f"⚠️ Hᴇʏ {query.from_user.first_name}\nTʜɪs ɪs ɴᴏᴛ ʏᴏᴜʀ ғɪʟᴇ ʏᴏᴜ ᴄᴀɴ'ᴛ ᴅᴏ ᴀɴʏ ᴏᴘᴇʀᴀᴛɪᴏɴ", show_alert=True)
         
         try:
+            # Default 720p compression settings
             c_thumb = await db.get_thumbnail(query.from_user.id)
             ffmpeg = "-preset veryfast -c:v libx264 -s 1280x720 -x265-params 'bframes=8:psy-rd=1:ref=3:aq-mode=3:aq-strength=0.8:deblock=1,1' -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 -threads 5"
             
-            # Add to queue
-            if user_id not in QUEUE:
-                QUEUE[user_id] = []
+            await query.message.edit(text='**Video added to compression queue at 720p**')
+            await CompressVideo(bot=bot, query=query, ffmpegcode=ffmpeg, c_thumb=c_thumb)
             
-            QUEUE[user_id].append({
-                'query': query,
-                'ffmpegcode': ffmpeg,
-                'c_thumb': c_thumb
-            })
-            
-            queue_position = len(QUEUE[user_id])
-            await query.message.edit(f'Added to compression queue at 720p!\nPosition: {queue_position}')
-            
-            # Process queue if this is the first item
-            if queue_position == 1:
-                await process_queue(bot, user_id)
-                
         except Exception as e:
-            print(e)
+            print(f"Error in auto_compress: {e}")
 
     elif data.startswith("close"):
         user_id = data.split('-')[1]
+        
         if int(user_id) not in [query.from_user.id, 0]:
             return await query.answer(f"⚠️ Hᴇʏ {query.from_user.first_name}\nTʜɪs ɪs ɴᴏᴛ ʏᴏᴜʀ ғɪʟᴇ ʏᴏᴜ ᴄᴀɴ'ᴛ ᴅᴏ ᴀɴʏ ᴏᴘᴇʀᴀᴛɪᴏɴ", show_alert=True)
         
@@ -114,41 +98,16 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
             await query.message.delete()
             await query.message.continue_propagation()
 
-async def process_queue(bot, user_id):
-    while user_id in QUEUE and QUEUE[user_id]:
-        task = QUEUE[user_id].pop(0)
-        await CompressVideo(bot=bot, query=task['query'], ffmpegcode=task['ffmpegcode'], c_thumb=task['c_thumb'])
-        await asyncio.sleep(2)  # Small delay between processing videos
-
-# Handler for automatic queue addition when video is sent
+# Assuming this is part of a larger bot, you might want to add a message handler
+# to automatically queue videos when they're sent
 @Client.on_message(filters.video & filters.private)
-async def auto_compress(bot: Client, message: Message):
-    user_id = str(message.from_user.id)
-    
-    # Create a dummy query object to mimic callback behavior
-    class DummyQuery:
-        def __init__(self, message):
-            self.message = message
-            self.from_user = message.from_user
-    
-    dummy_query = DummyQuery(message)
-    
-    # Add to queue automatically
-    if user_id not in QUEUE:
-        QUEUE[user_id] = []
-    
-    c_thumb = await db.get_thumbnail(message.from_user.id)
-    ffmpeg = "-preset veryfast -c:v libx264 -s 1280x720 -x265-params 'bframes=8:psy-rd=1:ref=3:aq-mode=3:aq-strength=0.8:deblock=1,1' -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 -threads 5"
-    
-    QUEUE[user_id].append({
-        'query': dummy_query,
-        'ffmpegcode': ffmpeg,
-        'c_thumb': c_thumb
-    })
-    
-    queue_position = len(QUEUE[user_id])
-    await message.reply(f'Video added to compression queue at 720p!\nPosition: {queue_position}')
-    
-    # Start processing if this is the first item
-    if queue_position == 1:
-        await process_queue(bot, user_id)
+async def auto_queue_video(bot: Client, message):
+    try:
+        text = f"""**__Video received! What do you want to do?__**\n\n**File Name** :- `{message.video.file_name}`\n\n**File Size** :- `{humanize.naturalsize(message.video.file_size)}`"""
+        buttons = [
+            [InlineKeyboardButton("Rᴇɴᴀᴍᴇ 📝", callback_data=f"rename-{message.from_user.id}")],
+            [InlineKeyboardButton("Cᴏᴍᴘʀᴇss 🗜️", callback_data=f"auto_compress-{message.from_user.id}")]
+        ]
+        await message.reply_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+    except Exception as e:
+        print(f"Error in auto_queue_video: {e}")
