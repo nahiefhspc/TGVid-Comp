@@ -40,14 +40,19 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
         try:
             await Compress_Stats(e=query, userid=user_id)
         except Exception as e:
-            print(e)
+            print(f"Stats error: {e}")
+            await query.answer("Error getting stats", show_alert=True)
 
     elif data.startswith('skip'):
         user_id = data.split('-')[1]
         try:
             await skip(e=query, userid=user_id)
+            # After skip, update the queue message if there are more items
+            if user_id in QUEUE and QUEUE[user_id]:
+                await query.message.edit(f"Process cancelled. Next item in queue starting...\nQueue remaining: {len(QUEUE[user_id])} items")
         except Exception as e:
-            print(e)
+            print(f"Skip error: {e}")
+            await query.answer("Error cancelling process", show_alert=True)
 
     elif data == 'option':
         file = getattr(query.message.reply_to_message, query.message.reply_to_message.media.value)
@@ -61,11 +66,12 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
     elif data == 'setffmpeg':
         try:
             ffmpeg_code = await bot.ask(text=Txt.SEND_FFMPEG_CODE, chat_id=query.from_user.id, filters=filters.text, timeout=60, disable_web_page_preview=True)
-        except:
-            return await query.message.reply_text("**Eʀʀᴏʀ!!**\n\nRᴇǫᴜᴇsᴛ ᴛɪᴍᴇᴅ ᴏᴜᴛ.\nSᴇᴛ ʙʏ ᴜsɪɴɢ /set_ffmpeg")
-        SnowDev = await query.message.reply_text(text="**Setting Your FFMPEG CODE**\n\nPlease Wait...")
-        await db.set_ffmpegcode(query.from_user.id, ffmpeg_code.text)
-        await SnowDev.edit("✅️ __**Fғᴍᴘᴇɢ Cᴏᴅᴇ Sᴇᴛ Sᴜᴄᴄᴇssғᴜʟʟʏ**__")
+            SnowDev = await query.message.reply_text(text="**Setting Your FFMPEG CODE**\n\nPlease Wait...")
+            await db.set_ffmpegcode(query.from_user.id, ffmpeg_code.text)
+            await SnowDev.edit("✅️ __**Fғᴍᴘᴇɢ Cᴏᴅᴇ Sᴇᴛ Sᴜᴄᴄᴇssғᴜʟʟʏ**__")
+        except Exception as e:
+            print(f"Set ffmpeg error: {e}")
+            await query.message.reply_text("**Eʀʀᴏʀ!!**\n\nRequest timed out.\nSet by using /set_ffmpeg")
 
     elif data.startswith('auto_compress'):
         user_id = data.split('-')[1]
@@ -74,15 +80,22 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
             return await query.answer(f"⚠️ Hᴇʏ {query.from_user.first_name}\nTʜɪs ɪs ɴᴏᴛ ʏᴏᴜʀ ғɪʟᴇ ʏᴏᴜ ᴄᴀɴ'ᴛ ᴅᴏ ᴀɴʏ ᴏᴘᴇʀᴀᴛɪᴏɴ", show_alert=True)
         
         try:
-            # Default 720p compression settings
-            c_thumb = await db.get_thumbnail(query.from_user.id)
-            ffmpeg = "-preset veryfast -c:v libx264 -s 1280x720 -x265-params 'bframes=8:psy-rd=1:ref=3:aq-mode=3:aq-strength=0.8:deblock=1,1' -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 -threads 5"
+            # Get custom ffmpeg code if set, otherwise use default
+            custom_ffmpeg = await db.get_ffmpegcode(query.from_user.id)
+            if custom_ffmpeg:
+                ffmpeg = custom_ffmpeg
+            else:
+                # Default 720p compression settings
+                ffmpeg = "-preset veryfast -c:v libx264 -s 1280x720 -x265-params 'bframes=8:psy-rd=1:ref=3:aq-mode=3:aq-strength=0.8:deblock=1,1' -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 -threads 5"
             
-            await query.message.edit(text='**Video added to compression queue at 720p**')
+            c_thumb = await db.get_thumbnail(query.from_user.id)
+            
+            # Add to queue and start processing
             await CompressVideo(bot=bot, query=query, ffmpegcode=ffmpeg, c_thumb=c_thumb)
             
         except Exception as e:
             print(f"Error in auto_compress: {e}")
+            await query.message.edit(f"Error occurred: {str(e)}")
 
     elif data.startswith("close"):
         user_id = data.split('-')[1]
@@ -93,21 +106,28 @@ async def Cb_Handle(bot: Client, query: CallbackQuery):
         try:
             await query.message.delete()
             await query.message.reply_to_message.delete()
-            await query.message.continue_propagation()
-        except:
+        except Exception as e:
+            print(f"Close error: {e}")
             await query.message.delete()
-            await query.message.continue_propagation()
 
-# Assuming this is part of a larger bot, you might want to add a message handler
-# to automatically queue videos when they're sent
 @Client.on_message(filters.video & filters.private)
 async def auto_queue_video(bot: Client, message):
     try:
+        from helper.utils import QUEUE  # Import QUEUE from utils
+        
         text = f"""**__Video received! What do you want to do?__**\n\n**File Name** :- `{message.video.file_name}`\n\n**File Size** :- `{humanize.naturalsize(message.video.file_size)}`"""
         buttons = [
             [InlineKeyboardButton("Rᴇɴᴀᴍᴇ 📝", callback_data=f"rename-{message.from_user.id}")],
             [InlineKeyboardButton("Cᴏᴍᴘʀᴇss 🗜️", callback_data=f"auto_compress-{message.from_user.id}")]
         ]
+        
+        # Check current queue status
+        user_id = str(message.from_user.id)
+        queue_length = len(QUEUE.get(user_id, []))
+        
+        if queue_length > 0:
+            text += f"\n\nCurrent queue position: {queue_length + 1}"
+        
         await message.reply_text(text=text, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
     except Exception as e:
         print(f"Error in auto_queue_video: {e}")
