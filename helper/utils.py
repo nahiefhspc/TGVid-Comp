@@ -122,7 +122,7 @@ async def CANT_CONFIG_GROUP_MSG(client, message):
     btn = [
         [InlineKeyboardButton(text='Bᴏᴛ Pᴍ', url=f'https://t.me/{botusername.username}')]
     ]
-    ms = await message.reply_text(text="Sᴏʀʀʏ Yᴏᴜ Cᴀɴ'ᴛ Cᴏɴғɪɢ Yᴏᴜʀ Sᴇᴛᴛɪɴɢs\n\nFɪʀsᴛ sᴛᴀʀᴛ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴛʜᴇɴ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍʏ ғᴇᴀᴛᴜᴇʀs ɪɴ ɢʀᴏᴜᴘ", reply_to_message_id = message.id, reply_markup=InlineKeyboardMarkup(btn))
+    ms = await message.reply_text(text="Sᴏʀʀʏ Yᴏᴜ Cᴀɴ'ᴛ Cᴏɴғɪɢ Yᴏᴜʀ Sᴇᴛᴛɪɴɢs\n\nFɪʀsᴛ sᴛᴀʀᴛ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴛʜᴇɴ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍʏ ғᴇᴀᴛᴜᴇʀs ɪɴ ɢʀᴏᴜᴘ", reply_to_message_id=message.id, reply_markup=InlineKeyboardMarkup(btn))
     await asyncio.sleep(10)
     await ms.delete()
 
@@ -162,20 +162,19 @@ async def skip(e, userid):
         shutil.rmtree(f'ffmpeg/{userid}')
         shutil.rmtree(f'encode/{userid}')
         if userid in QUEUE:
-            QUEUE[userid] = []  # Clear queue on skip
+            QUEUE[userid] = []
     except Exception as e:
         pass
     return
 
-async def process_queue(bot, UID):
+async process_queue(bot, UID):
     while UID in QUEUE and QUEUE[UID]:
-        task = QUEUE[UID].pop(0)
-        await compress_single_video(bot, task['query'], task['ffmpegcode'], task['c_thumb'])
-        await asyncio.sleep(2)  # Small delay between videos
-
-async def compress_single_video(bot, query, ffmpegcode, c_thumb):
+        query = QUEUE[UID].pop(0)
+        await process_single_video(bot, query, query.data.split('|')[1], query.data.split('|')[2] if len(query.data.split('|')) > 2 else None)
+        
+async def process_single_video(bot, query, ffmpegcode, c_thumb):
     UID = query.from_user.id
-    ms = query.message
+    ms = await query.message.edit('Pʟᴇᴀsᴇ Wᴀɪᴛ...\n\n**Fᴇᴛᴄʜɪɴɢ Qᴜᴇᴜᴇ 👥**')
     
     try:
         media = query.message.reply_to_message
@@ -186,7 +185,7 @@ async def compress_single_video(bot, query, ffmpegcode, c_thumb):
         File_Path = f"ffmpeg/{UID}/{filename}"
         Output_Path = f"encode/{UID}/{filename}"
         
-        await ms.edit('⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Dᴏᴡɴʟᴏᴀᴅɪɴɢ....**')
+        await ms.edit(f'⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Dᴏᴡɴʟᴏᴀᴅɪɴɢ....**\nQueue remaining: {len(QUEUE.get(UID, []))} items')
         s = dt.now()
         try:
             if not os.path.isdir(Download_DIR) and not os.path.isdir(Output_DIR):
@@ -197,9 +196,10 @@ async def compress_single_video(bot, query, ffmpegcode, c_thumb):
                     message=file,
                     file_name=File_Path,
                     progress=progress_for_pyrogram,
-                    progress_args=("\n⚠️__**Please wait...**__\n\n☃️ **Dᴏᴡɴʟᴏᴀᴅ Sᴛᴀʀᴛᴇᴅ....**", ms, time.time())
+                    progress_args=(f"\n⚠️__**Please wait...**__\n\n☃️ **Dᴏᴡɴʟᴏᴀᴅ Sᴛᴀʀᴛᴇᴅ....**\nQueue remaining: {len(QUEUE.get(UID, []))} items", ms, time.time())
                 )
         except Exception as e:
+            QUEUE[UID] = []
             await ms.edit(str(e))
             return
         
@@ -223,12 +223,16 @@ async def compress_single_video(bot, query, ffmpegcode, c_thumb):
         stdout, stderr = await process.communicate()
         er = stderr.decode()
 
-        if er:
-            await ms.edit(str(er) + "\n\n**Error**")
-            shutil.rmtree(f"ffmpeg/{UID}")
-            shutil.rmtree(f"encode/{UID}")
-            return
-
+        try:
+            if er:
+                await ms.edit(str(er) + "\n\n**Error**")
+                shutil.rmtree(f"ffmpeg/{UID}")
+                shutil.rmtree(f"encode/{UID}")
+                QUEUE[UID] = []
+                return
+        except BaseException:
+            pass
+        
         ees = dt.now()
         
         if (file.thumbs or c_thumb):
@@ -264,11 +268,16 @@ async def compress_single_video(bot, query, ffmpegcode, c_thumb):
             shutil.rmtree(f"ffmpeg/{UID}")
             shutil.rmtree(f"encode/{UID}")
             os.remove(ph_path)
-        except:
-            pass
+        except BaseException:
+            os.remove(f"ffmpeg/{UID}")
+            os.remove(f"ffmpeg/{UID}")
+        
+        # Process next item in queue after completion
+        await process_queue(bot, UID)
 
     except Exception as e:
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+        QUEUE[UID] = []
 
 async def CompressVideo(bot, query, ffmpegcode, c_thumb):
     UID = query.from_user.id
@@ -278,18 +287,13 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
     if UID not in QUEUE:
         QUEUE[UID] = []
     
-    # Add task to queue
-    task = {
-        'query': query,
-        'ffmpegcode': ffmpegcode,
-        'c_thumb': c_thumb
-    }
-    QUEUE[UID].append(task)
+    # Add to queue
+    QUEUE[UID].append(query)
     
     # Show queue position
     queue_position = len(QUEUE[UID])
-    await ms.edit(f'Added to queue!\nPosition: {queue_position}\nTotal in queue: {len(QUEUE[UID])}')
+    await ms.edit(f'Added to queue!\nPosition: {queue_position}\n\nPlease wait for your turn...')
     
-    # If this is the only item in queue, start processing
+    # If this is the first item in queue, start processing
     if queue_position == 1:
         await process_queue(bot, UID)
