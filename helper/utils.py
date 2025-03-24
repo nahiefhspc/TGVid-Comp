@@ -16,11 +16,9 @@ from script import Txt
 from pyrogram import enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Dictionary to store queues for different users
 QUEUE = {}
 
 async def progress_for_pyrogram(current, total, ud_type, message, start):
@@ -168,12 +166,12 @@ async def skip(e, userid):
         logger.error(f"Skip error for user {userid}: {str(e)}")
     return
 
-async def process_queue(bot, UID):
+async def process_queue(bot, UID, ffmpegcode, c_thumb):
     while UID in QUEUE and QUEUE[UID]:
         query = QUEUE[UID].pop(0)
         logger.info(f"Processing queue item for user {UID}. Queue remaining: {len(QUEUE[UID])}")
         try:
-            await process_single_video(bot, query, query.data.split('|')[1], query.data.split('|')[2] if len(query.data.split('|')) > 2 else None)
+            await process_single_video(bot, query, ffmpegcode, c_thumb)
         except Exception as e:
             logger.error(f"Queue processing error for user {UID}: {str(e)}")
             QUEUE[UID] = []  # Clear queue on error
@@ -276,7 +274,7 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
         if ph_path and os.path.exists(ph_path):
             os.remove(ph_path)
             
-        await process_queue(bot, UID)
+        await process_queue(bot, UID, ffmpegcode, c_thumb)
 
     except Exception as e:
         logger.error(f"Process single video error for user {UID}: {str(e)}")
@@ -298,4 +296,4 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
     logger.info(f"Video added to queue for user {UID}. Position: {queue_position}")
     
     if queue_position == 1:
-        await process_queue(bot, UID)
+        await process_queue(bot, UID, ffmpegcode, c_thumb)
