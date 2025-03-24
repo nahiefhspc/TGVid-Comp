@@ -6,6 +6,7 @@ import sys
 import shutil
 import signal
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 import psutil
@@ -14,6 +15,10 @@ from config import Config
 from script import Txt
 from pyrogram import enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Dictionary to store queues for different users
 QUEUE = {}
@@ -130,19 +135,17 @@ async def Compress_Stats(e, userid):
     if int(userid) not in [e.from_user.id, 0]:
         return await e.answer(f"⚠️ Hᴇʏ {e.from_user.first_name}\nYᴏᴜ ᴄᴀɴ'ᴛ sᴇᴇ sᴛᴀᴛᴜs ᴀs ᴛʜɪs ɪs ɴᴏᴛ ʏᴏᴜʀ ғɪʟᴇ", show_alert=True)
     
-    inp = f"ffmpeg/{e.from_user.id}/{os.listdir(f'ffmpeg/{e.from_user.id}')[0]}"
-    outp = f"encode/{e.from_user.id}/{os.listdir(f'encode/{e.from_user.id}')[0]}"
     try:
+        inp = f"ffmpeg/{e.from_user.id}/{os.listdir(f'ffmpeg/{e.from_user.id}')[0]}"
+        outp = f"encode/{e.from_user.id}/{os.listdir(f'encode/{e.from_user.id}')[0]}"
         ot = humanbytes(int((Path(outp).stat().st_size)))
         ov = humanbytes(int(Path(inp).stat().st_size))
         processing_file_name = inp.replace(f"ffmpeg/{userid}/", "").replace(f"_", " ")
         ans = f"Processing Media: {processing_file_name}\n\nDownloaded: {ov}\n\nCompressed: {ot}"
         await e.answer(ans, cache_time=0, show_alert=True)
     except Exception as er:
-        print(er)
-        await e.answer(
-            "Someting Went Wrong.\nSend Media Again.", cache_time=0, alert=True
-        )
+        logger.error(f"Compress_Stats error: {str(er)}")
+        await e.answer("Something Went Wrong.\nSend Media Again.", cache_time=0, alert=True)
 
 async def skip(e, userid):
     if int(userid) not in [e.from_user.id, 0]:
@@ -156,28 +159,35 @@ async def skip(e, userid):
             processID = proc.pid
             if processName == "ffmpeg":
                 os.kill(processID, signal.SIGKILL)
-    except Exception as e:
-        pass
-    try:
-        shutil.rmtree(f'ffmpeg/{userid}')
-        shutil.rmtree(f'encode/{userid}')
+        shutil.rmtree(f'ffmpeg/{userid}', ignore_errors=True)
+        shutil.rmtree(f'encode/{userid}', ignore_errors=True)
         if userid in QUEUE:
             QUEUE[userid] = []
+        logger.info(f"Process skipped for user {userid}")
     except Exception as e:
-        pass
+        logger.error(f"Skip error for user {userid}: {str(e)}")
     return
 
 async def process_queue(bot, UID):
     while UID in QUEUE and QUEUE[UID]:
         query = QUEUE[UID].pop(0)
-        await process_single_video(bot, query, query.data.split('|')[1], query.data.split('|')[2] if len(query.data.split('|')) > 2 else None)
-        
+        logger.info(f"Processing queue item for user {UID}. Queue remaining: {len(QUEUE[UID])}")
+        try:
+            await process_single_video(bot, query, query.data.split('|')[1], query.data.split('|')[2] if len(query.data.split('|')) > 2 else None)
+        except Exception as e:
+            logger.error(f"Queue processing error for user {UID}: {str(e)}")
+            QUEUE[UID] = []  # Clear queue on error
+            
 async def process_single_video(bot, query, ffmpegcode, c_thumb):
     UID = query.from_user.id
     ms = await query.message.edit('Pʟᴇᴀsᴇ Wᴀɪᴛ...\n\n**Fᴇᴛᴄʜɪɴɢ Qᴜᴇᴜᴇ 👥**')
     
     try:
         media = query.message.reply_to_message
+        if not media:
+            await ms.edit("No media found in reply")
+            return
+            
         file = getattr(media, media.media.value)
         filename = Filename(filename=str(file.file_name), mime_type=str(file.mime_type))
         Download_DIR = f"ffmpeg/{UID}"
@@ -187,21 +197,19 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
         
         await ms.edit(f'⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Dᴏᴡɴʟᴏᴀᴅɪɴɢ....**\nQueue remaining: {len(QUEUE.get(UID, []))} items')
         s = dt.now()
-        try:
-            if not os.path.isdir(Download_DIR) and not os.path.isdir(Output_DIR):
-                os.makedirs(Download_DIR)
-                os.makedirs(Output_DIR)
+        
+        if not os.path.isdir(Download_DIR):
+            os.makedirs(Download_DIR)
+        if not os.path.isdir(Output_DIR):
+            os.makedirs(Output_DIR)
 
-                dl = await bot.download_media(
-                    message=file,
-                    file_name=File_Path,
-                    progress=progress_for_pyrogram,
-                    progress_args=(f"\n⚠️__**Please wait...**__\n\n☃️ **Dᴏᴡɴʟᴏᴀᴅ Sᴛᴀʀᴛᴇᴅ....**\nQueue remaining: {len(QUEUE.get(UID, []))} items", ms, time.time())
-                )
-        except Exception as e:
-            QUEUE[UID] = []
-            await ms.edit(str(e))
-            return
+        dl = await bot.download_media(
+            message=file,
+            file_name=File_Path,
+            progress=progress_for_pyrogram,
+            progress_args=(f"\n⚠️__**Please wait...**__\n\n☃️ **Dᴏᴡɴʟᴏᴀᴅ Sᴛᴀʀᴛᴇᴅ....**\nQueue remaining: {len(QUEUE.get(UID, []))} items", ms, time.time())
+        )
+        logger.info(f"Download completed for {filename}")
         
         es = dt.now()
         dtime = ts(int((es - s).seconds) * 1000)
@@ -215,6 +223,7 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
         )
         
         cmd = f"""ffmpeg -i "{dl}" {ffmpegcode} "{Output_Path}" -y"""
+        logger.info(f"Starting compression with command: {cmd}")
 
         process = await asyncio.create_subprocess_shell(
             cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -222,33 +231,30 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
         
         stdout, stderr = await process.communicate()
         er = stderr.decode()
-
-        try:
-            if er:
-                await ms.edit(str(er) + "\n\n**Error**")
-                shutil.rmtree(f"ffmpeg/{UID}")
-                shutil.rmtree(f"encode/{UID}")
-                QUEUE[UID] = []
-                return
-        except BaseException:
-            pass
-        
+        if er:
+            logger.error(f"FFmpeg error: {er}")
+            await ms.edit(f"Compression failed: {er}\n\n**Error**")
+            shutil.rmtree(f"ffmpeg/{UID}", ignore_errors=True)
+            shutil.rmtree(f"encode/{UID}", ignore_errors=True)
+            QUEUE[UID] = []
+            return
+            
+        logger.info(f"Compression completed for {filename}")
         ees = dt.now()
         
-        if (file.thumbs or c_thumb):
-            if c_thumb:
-                ph_path = await bot.download_media(c_thumb)
-            else:
-                ph_path = await bot.download_media(file.thumbs[0].file_id)
+        ph_path = None
+        if file.thumbs or c_thumb:
+            ph_path = await bot.download_media(c_thumb if c_thumb else file.thumbs[0].file_id)
 
         org = int(Path(File_Path).stat().st_size)
-        com = int((Path(Output_Path).stat().st_size))
+        com = int(Path(Output_Path).stat().st_size)
         pe = 100 - ((com / org) * 100)
         per = str(f"{pe:.2f}") + "%"
         eees = dt.now()
         x = dtime
         xx = ts(int((ees - es).seconds) * 1000)
         xxx = ts(int((eees - ees).seconds) * 1000)
+        
         await ms.edit("⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Uᴩʟᴏᴀᴅɪɴɢ....**")
         await bot.send_document(
             UID,
@@ -257,6 +263,7 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
             caption=Config.caption.format(filename, humanbytes(org), humanbytes(com), per, x, xx, xxx),
             progress=progress_for_pyrogram,
             progress_args=("⚠️__**Please wait...**__\n🌨️ **Uᴩʟᴏᴅ Sᴛᴀʀᴛᴇᴅ....**", ms, time.time()))
+        logger.info(f"Upload completed for {filename}")
         
         if query.message.chat.type == enums.ChatType.SUPERGROUP:
             botusername = await bot.get_me()
@@ -264,36 +271,31 @@ async def process_single_video(bot, query, ffmpegcode, c_thumb):
         else:
             await ms.delete()
 
-        try:
-            shutil.rmtree(f"ffmpeg/{UID}")
-            shutil.rmtree(f"encode/{UID}")
+        shutil.rmtree(f"ffmpeg/{UID}", ignore_errors=True)
+        shutil.rmtree(f"encode/{UID}", ignore_errors=True)
+        if ph_path and os.path.exists(ph_path):
             os.remove(ph_path)
-        except BaseException:
-            os.remove(f"ffmpeg/{UID}")
-            os.remove(f"ffmpeg/{UID}")
-        
-        # Process next item in queue after completion
+            
         await process_queue(bot, UID)
 
     except Exception as e:
-        print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+        logger.error(f"Process single video error for user {UID}: {str(e)}")
+        await ms.edit(f"An error occurred: {str(e)}")
+        shutil.rmtree(f"ffmpeg/{UID}", ignore_errors=True)
+        shutil.rmtree(f"encode/{UID}", ignore_errors=True)
         QUEUE[UID] = []
 
 async def CompressVideo(bot, query, ffmpegcode, c_thumb):
     UID = query.from_user.id
     ms = await query.message.edit('Pʟᴇᴀsᴇ Wᴀɪᴛ...\n\n**Fᴇᴛᴄʜɪɴɢ Qᴜᴇᴜᴇ 👥**')
     
-    # Initialize queue for user if not exists
     if UID not in QUEUE:
         QUEUE[UID] = []
     
-    # Add to queue
     QUEUE[UID].append(query)
-    
-    # Show queue position
     queue_position = len(QUEUE[UID])
     await ms.edit(f'Added to queue!\nPosition: {queue_position}\n\nPlease wait for your turn...')
+    logger.info(f"Video added to queue for user {UID}. Position: {queue_position}")
     
-    # If this is the first item in queue, start processing
     if queue_position == 1:
         await process_queue(bot, UID)
