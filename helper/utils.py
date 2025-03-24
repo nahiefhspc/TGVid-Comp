@@ -15,10 +15,8 @@ from script import Txt
 from pyrogram import enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 
-
-QUEUE = []
-
-
+# Dictionary to store queues for different users
+QUEUE = {}
 
 async def progress_for_pyrogram(current, total, ud_type, message, start):
     now = time.time()
@@ -63,7 +61,6 @@ def humanbytes(size):
         n += 1
     return str(round(size, 2)) + " " + Dic_powerN[n] + 'ʙ'
 
-
 def TimeFormatter(milliseconds: int) -> str:
     seconds, milliseconds = divmod(int(milliseconds), 1000)
     minutes, seconds = divmod(seconds, 60)
@@ -98,7 +95,6 @@ def ts(milliseconds: int) -> str:
     )
     return tmp[:-2]
 
-
 async def send_log(b, u):
     if Config.LOG_CHANNEL is not None:
         botusername = await b.get_me()
@@ -109,37 +105,28 @@ async def send_log(b, u):
             Config.LOG_CHANNEL,
             f"**--Nᴇᴡ Uꜱᴇʀ Sᴛᴀʀᴛᴇᴅ Tʜᴇ Bᴏᴛ--**\n\nUꜱᴇʀ: {u.mention}\nIᴅ: `{u.id}`\nUɴ: @{u.username}\n\nDᴀᴛᴇ: {date}\nTɪᴍᴇ: {time}\n\nBy: @{botusername.username}"
         )
-        
 
 def Filename(filename, mime_type):
     if filename.split('.')[-1] in ['mkv', 'mp4', 'mp3', 'mov']:
-
         return filename
-
     else:
         if mime_type.split('/')[1] in ['pdf', 'mkv', 'mp4', 'mp3']:
             return f"{filename}.{mime_type.split('/')[1]}"
-        
         elif mime_type.split('/')[0] == "audio":
             return f"{filename}.mp3"
-
         else:
             return f"{filename}.mkv"
-            
+
 async def CANT_CONFIG_GROUP_MSG(client, message):
     botusername = await client.get_me()
     btn = [
         [InlineKeyboardButton(text='Bᴏᴛ Pᴍ', url=f'https://t.me/{botusername.username}')]
     ]
     ms = await message.reply_text(text="Sᴏʀʀʏ Yᴏᴜ Cᴀɴ'ᴛ Cᴏɴғɪɢ Yᴏᴜʀ Sᴇᴛᴛɪɴɢs\n\nFɪʀsᴛ sᴛᴀʀᴛ ᴍᴇ ɪɴ ᴘʀɪᴠᴀᴛᴇ ᴛʜᴇɴ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍʏ ғᴇᴀᴛᴜᴇʀs ɪɴ ɢʀᴏᴜᴘ", reply_to_message_id = message.id, reply_markup=InlineKeyboardMarkup(btn))
-
     await asyncio.sleep(10)
     await ms.delete()
 
-
 async def Compress_Stats(e, userid):
-
-
     if int(userid) not in [e.from_user.id, 0]:
         return await e.answer(f"⚠️ Hᴇʏ {e.from_user.first_name}\nYᴏᴜ ᴄᴀɴ'ᴛ sᴇᴇ sᴛᴀᴛᴜs ᴀs ᴛʜɪs ɪs ɴᴏᴛ ʏᴏᴜʀ ғɪʟᴇ", show_alert=True)
     
@@ -158,7 +145,6 @@ async def Compress_Stats(e, userid):
         )
 
 async def skip(e, userid):
-
     if int(userid) not in [e.from_user.id, 0]:
         return await e.answer(f"⚠️ Hᴇʏ {e.from_user.first_name}\nYᴏᴜ ᴄᴀɴ'ᴛ ᴄᴀɴᴄᴇʟ ᴛʜᴇ ᴘʀᴏᴄᴇss ᴀs ʏᴏᴜ ᴅɪᴅɴ'ᴛ sᴛᴀʀᴛ ɪᴛ", show_alert=True)
     try:
@@ -168,36 +154,37 @@ async def skip(e, userid):
         for proc in psutil.process_iter():
             processName = proc.name()
             processID = proc.pid
-            print(processName , ' - ', processID)
-            if(processName == "ffmpeg"):
-             os.kill(processID,signal.SIGKILL)
+            if processName == "ffmpeg":
+                os.kill(processID, signal.SIGKILL)
     except Exception as e:
         pass
     try:
-        shutil.rmtree(f'ffmpeg' + '/' + str(userid))
-        shutil.rmtree(f'encode' + '/' + str(userid))
+        shutil.rmtree(f'ffmpeg/{userid}')
+        shutil.rmtree(f'encode/{userid}')
+        if userid in QUEUE:
+            QUEUE[userid] = []  # Clear queue on skip
     except Exception as e:
         pass
-    
     return
 
-async def CompressVideo(bot, query, ffmpegcode, c_thumb):
+async def process_queue(bot, UID):
+    while UID in QUEUE and QUEUE[UID]:
+        task = QUEUE[UID].pop(0)
+        await compress_single_video(bot, task['query'], task['ffmpegcode'], task['c_thumb'])
+        await asyncio.sleep(2)  # Small delay between videos
+
+async def compress_single_video(bot, query, ffmpegcode, c_thumb):
     UID = query.from_user.id
-    ms = await query.message.edit('Pʟᴇᴀsᴇ Wᴀɪᴛ...\n\n**Fᴇᴛᴄʜɪɴɢ Qᴜᴇᴜᴇ 👥**')
+    ms = query.message
     
-
-    if os.path.isdir(f'ffmpeg/{UID}') and os.path.isdir(f'encode/{UID}'):
-        return await ms.edit("**⚠️ Yᴏᴜ ᴄᴀɴ ᴄᴏᴍᴘʀᴇss ᴏɴʟʏ ᴏɴᴇ ғɪʟᴇ ᴀᴛ ᴀ ᴛɪᴍᴇ\n\nAs ᴛʜɪs ʜᴇʟᴘs ʀᴇᴅᴜᴄᴇ sᴇʀᴠᴇʀ ʟᴏᴀᴅ.**")
-
     try:
         media = query.message.reply_to_message
-        file = getattr(media , media.media.value)
+        file = getattr(media, media.media.value)
         filename = Filename(filename=str(file.file_name), mime_type=str(file.mime_type))
         Download_DIR = f"ffmpeg/{UID}"
         Output_DIR = f"encode/{UID}"
         File_Path = f"ffmpeg/{UID}/{filename}"
         Output_Path = f"encode/{UID}/{filename}"
-        
         
         await ms.edit('⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Dᴏᴡɴʟᴏᴀᴅɪɴɢ....**')
         s = dt.now()
@@ -213,7 +200,8 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
                     progress_args=("\n⚠️__**Please wait...**__\n\n☃️ **Dᴏᴡɴʟᴏᴀᴅ Sᴛᴀʀᴛᴇᴅ....**", ms, time.time())
                 )
         except Exception as e:
-            return await ms.edit(str(e))
+            await ms.edit(str(e))
+            return
         
         es = dt.now()
         dtime = ts(int((es - s).seconds) * 1000)
@@ -232,22 +220,15 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
             cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         
-
         stdout, stderr = await process.communicate()
         er = stderr.decode()
 
-        try:
-            if er:
-                await ms.edit(str(er) + "\n\n**Error**")
-                shutil.rmtree(f"ffmpeg/{UID}")
-                shutil.rmtree(f"encode/{UID}")
-                return
-        except BaseException:
-            pass
-        
+        if er:
+            await ms.edit(str(er) + "\n\n**Error**")
+            shutil.rmtree(f"ffmpeg/{UID}")
+            shutil.rmtree(f"encode/{UID}")
+            return
 
-        # Clean up resources
-        # Now Uploading to the User
         ees = dt.now()
         
         if (file.thumbs or c_thumb):
@@ -259,24 +240,23 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
         org = int(Path(File_Path).stat().st_size)
         com = int((Path(Output_Path).stat().st_size))
         pe = 100 - ((com / org) * 100)
-        per = str(f"{pe:.2f}")  + "%"
+        per = str(f"{pe:.2f}") + "%"
         eees = dt.now()
         x = dtime
         xx = ts(int((ees - es).seconds) * 1000)
         xxx = ts(int((eees - ees).seconds) * 1000)
         await ms.edit("⚠️__**Please wait...**__\n**Tʀyɪɴɢ Tᴏ Uᴩʟᴏᴀᴅɪɴɢ....**")
         await bot.send_document(
-                UID,
-                document=Output_Path,
-                thumb=ph_path,
-                caption=Config.caption.format(filename, humanbytes(org), humanbytes(com) , per, x, xx, xxx),
-                progress=progress_for_pyrogram,
-                progress_args=("⚠️__**Please wait...**__\n🌨️ **Uᴩʟᴏᴅ Sᴛᴀʀᴛᴇᴅ....**", ms, time.time()))
+            UID,
+            document=Output_Path,
+            thumb=ph_path,
+            caption=Config.caption.format(filename, humanbytes(org), humanbytes(com), per, x, xx, xxx),
+            progress=progress_for_pyrogram,
+            progress_args=("⚠️__**Please wait...**__\n🌨️ **Uᴩʟᴏᴅ Sᴛᴀʀᴛᴇᴅ....**", ms, time.time()))
         
         if query.message.chat.type == enums.ChatType.SUPERGROUP:
             botusername = await bot.get_me()
             await ms.edit(f"Hey {query.from_user.mention},\n\nI Have Send Compressed File To Your Pm", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(text="Bᴏᴛ Pᴍ", url=f'https://t.me/{botusername.username}')]]))
-            
         else:
             await ms.delete()
 
@@ -284,10 +264,32 @@ async def CompressVideo(bot, query, ffmpegcode, c_thumb):
             shutil.rmtree(f"ffmpeg/{UID}")
             shutil.rmtree(f"encode/{UID}")
             os.remove(ph_path)
-        except BaseException:
-            os.remove(f"ffmpeg/{UID}")
-            os.remove(f"ffmpeg/{UID}")
+        except:
+            pass
 
-        
     except Exception as e:
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+
+async def CompressVideo(bot, query, ffmpegcode, c_thumb):
+    UID = query.from_user.id
+    ms = await query.message.edit('Pʟᴇᴀsᴇ Wᴀɪᴛ...\n\n**Fᴇᴛᴄʜɪɴɢ Qᴜᴇᴜᴇ 👥**')
+    
+    # Initialize queue for user if not exists
+    if UID not in QUEUE:
+        QUEUE[UID] = []
+    
+    # Add task to queue
+    task = {
+        'query': query,
+        'ffmpegcode': ffmpegcode,
+        'c_thumb': c_thumb
+    }
+    QUEUE[UID].append(task)
+    
+    # Show queue position
+    queue_position = len(QUEUE[UID])
+    await ms.edit(f'Added to queue!\nPosition: {queue_position}\nTotal in queue: {len(QUEUE[UID])}')
+    
+    # If this is the only item in queue, start processing
+    if queue_position == 1:
+        await process_queue(bot, UID)
