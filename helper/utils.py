@@ -167,7 +167,7 @@ async def skip(e, userid):
         pass
     return
 
-async process_queue(bot, UID):
+async def process_queue(bot, UID):
     while UID in QUEUE and QUEUE[UID]:
         query = QUEUE[UID].pop(0)
         await process_single_video(bot, query, query.data.split('|')[1], query.data.split('|')[2] if len(query.data.split('|')) > 2 else None)
